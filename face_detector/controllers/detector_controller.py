@@ -16,7 +16,9 @@ import os
 from face_detector.config.settings import (
     RTSP_URL, PESSOA_CONHECIDA_ENCODING, PESSOA_INFO,
     MOVIMENTO_THRESHOLD, AREA_MINIMA_CONTORNO, FRAMES_APOS_MOVIMENTO,
-    MAX_FRAMES_SEM_DETECCAO, MODO_DEBUG, COR_VERDE, COR_AMARELO
+    MAX_FRAMES_SEM_DETECCAO, MODO_DEBUG, COR_VERDE, COR_AMARELO,
+    INTERVALO_MINIMO_MOVIMENTO, INTERVALO_MINIMO_FACE, TEMPO_EXPIRACAO_FACE,
+    BUFFER_SIZE_CAPTURA, TAXA_FPS_CAPTURA, TAXA_FPS_UI
 )
 from face_detector.services.face_detector import FaceDetector
 from face_detector.services.motion_detector import MotionDetector
@@ -99,7 +101,7 @@ class DetectorController:
     def iniciar(self):
         """Inicia o processamento do stream de vídeo com threads separadas"""
         # Inicializar captura de vídeo assíncrona com buffer menor para menor latência
-        self.video_capture = VideoCapture(self.source, buffer_size=10)
+        self.video_capture = VideoCapture(self.source, buffer_size=BUFFER_SIZE_CAPTURA)
         if not self.video_capture.start():
             log_error("Falha ao iniciar captura de vídeo. Verifique a conexão com a câmera.")
             return False
@@ -154,7 +156,7 @@ class DetectorController:
         log_info("Thread de captura iniciada")
         
         last_frame_time = time.time()
-        frame_interval = 1.0 / 30.0  # Limitar a 30 FPS
+        frame_interval = 1.0 / TAXA_FPS_CAPTURA  # Limitar a taxa de FPS configurada
         
         while self.running:
             try:
@@ -197,7 +199,6 @@ class DetectorController:
         frame_anterior = None
         movimento_count = 0
         ultimo_movimento = 0  # Timestamp do último movimento detectado
-        intervalo_minimo_movimento = 0.5  # Reduzido para 0.5 segundos para ambientes com muitas pessoas
         
         while self.running:
             try:
@@ -224,7 +225,7 @@ class DetectorController:
                 frame_anterior = frame.copy()
                 
                 # Se detectou movimento e passou tempo suficiente desde a última detecção
-                if movimento_detectado and (tempo_desde_ultimo_movimento >= intervalo_minimo_movimento or self.frames_restantes_apos_movimento == 0):
+                if movimento_detectado and (tempo_desde_ultimo_movimento >= INTERVALO_MINIMO_MOVIMENTO or self.frames_restantes_apos_movimento == 0):
                     self.frames_sem_deteccao = 0  # Resetar contador de frames sem detecção
                     self.stats['movimento_detectado'] += 1
                     ultimo_movimento = timestamp  # Atualizar timestamp do último movimento
@@ -277,9 +278,7 @@ class DetectorController:
         log_info("Thread de processamento facial iniciada")
         
         ultima_face_timestamp = 0
-        intervalo_minimo_face = 0.3  # Reduzido para 0.3 segundos para ambientes com muitas pessoas
         faces_processadas = {}  # Dicionário para rastrear faces já processadas recentemente
-        tempo_expiracao_face = 3.0  # Tempo em segundos para considerar uma face como "nova" novamente
         
         while self.running:
             try:
@@ -300,7 +299,7 @@ class DetectorController:
                 # Se encontrou face, atualizar timestamp
                 if face_encontrada:
                     # Só atualizar o timestamp se passou tempo suficiente ou se é uma nova detecção
-                    if tempo_desde_ultima_face >= intervalo_minimo_face:
+                    if tempo_desde_ultima_face >= INTERVALO_MINIMO_FACE:
                         ultima_face_timestamp = timestamp
                     
                     self.stats['faces_detectadas'] += 1
@@ -334,8 +333,7 @@ class DetectorController:
     def _main_loop(self):
         """Loop principal para exibição de frames processados"""
         try:
-            ui_fps_target = 30  # FPS alvo para a UI
-            ui_frame_interval = 1.0 / ui_fps_target
+            ui_frame_interval = 1.0 / TAXA_FPS_UI
             last_ui_update = time.time()
             
             while self.running and not self.shutdown_requested:

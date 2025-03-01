@@ -11,13 +11,20 @@ RTSP_URL = "rtsp://192.168.0.136:554/0/av0"
 MOVIMENTO_THRESHOLD = 15000  # Limiar de detecção de movimento (quanto menor, mais sensível)
 AREA_MINIMA_CONTORNO = 5000  # Área mínima de contorno para considerar como movimento real
 FRAMES_APOS_MOVIMENTO = 5    # Número de frames para processar após detectar movimento
+INTERVALO_MINIMO_MOVIMENTO = 0.5  # Intervalo mínimo entre detecções de movimento (segundos)
 
 # Configurações de reconhecimento facial
 FACE_SIMILARITY_THRESHOLD = 0.6  # Limiar de similaridade (quanto menor, mais restritivo)
 FACE_DETECTION_INTERVAL = 30     # Intervalo para detecção de faces (a cada quantos frames)
-# INTERVALO_SALVAMENTO_FACES = 1.0  # Intervalo mínimo entre salvamentos de faces (em segundos)
+INTERVALO_MINIMO_FACE = 0.3      # Intervalo mínimo entre processamentos de face (segundos)
+TEMPO_EXPIRACAO_FACE = 3.0       # Tempo para considerar uma face como "nova" novamente (segundos)
 MODELO_FACE = "hog"              # Modelo para detecção facial (hog ou cnn)
 NUM_JITTERS = 3                  # Número de vezes para amostrar a face durante o encoding
+
+# Configurações de captura e processamento
+BUFFER_SIZE_CAPTURA = 10         # Tamanho do buffer de frames para captura
+TAXA_FPS_CAPTURA = 30            # Taxa de FPS alvo para captura
+TAXA_FPS_UI = 30                 # Taxa de FPS alvo para interface gráfica
 
 # Configurações de qualidade de imagem
 RESOLUCAO_CAPTURA = (1920, 1080)  # HD para melhor desempenho
