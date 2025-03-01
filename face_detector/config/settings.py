@@ -15,7 +15,7 @@ FRAMES_APOS_MOVIMENTO = 5    # Número de frames para processar após detectar m
 # Configurações de reconhecimento facial
 FACE_SIMILARITY_THRESHOLD = 0.6  # Limiar de similaridade (quanto menor, mais restritivo)
 FACE_DETECTION_INTERVAL = 30     # Intervalo para detecção de faces (a cada quantos frames)
-INTERVALO_SALVAMENTO_FACES = 1.0  # Intervalo mínimo entre salvamentos de faces (em segundos)
+# INTERVALO_SALVAMENTO_FACES = 1.0  # Intervalo mínimo entre salvamentos de faces (em segundos)
 MODELO_FACE = "hog"              # Modelo para detecção facial (hog ou cnn)
 NUM_JITTERS = 3                  # Número de vezes para amostrar a face durante o encoding
 

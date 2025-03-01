@@ -1,9 +1,12 @@
 """
 Serviço para detecção e reconhecimento facial.
+Implementa processamento paralelo para melhor desempenho.
 """
 import cv2
 import face_recognition
 from datetime import datetime
+import concurrent.futures
+import numpy as np
 from face_detector.config.settings import (
     FACE_SIMILARITY_THRESHOLD, MODELO_FACE, NUM_JITTERS,
     COR_VERDE, COR_VERMELHO, QUALIDADE_JPEG
@@ -12,13 +15,23 @@ from face_detector.utils.logger import log_face, log_captura
 from face_detector.utils.image_utils import melhorar_imagem, salvar_imagem
 
 class FaceDetector:
-    """Classe para detecção e reconhecimento facial"""
+    """Classe para detecção e reconhecimento facial com processamento paralelo"""
     
-    def __init__(self, similarity_threshold=None, modelo=None, num_jitters=None):
-        """Inicializa o detector facial com os parâmetros especificados"""
+    def __init__(self, similarity_threshold=None, modelo=None, num_jitters=None, max_workers=4):
+        """
+        Inicializa o detector facial com os parâmetros especificados
+        
+        Args:
+            similarity_threshold: Limiar de similaridade para reconhecimento
+            modelo: Modelo de detecção (hog ou cnn)
+            num_jitters: Número de vezes para amostrar a face durante o encoding
+            max_workers: Número máximo de threads para processamento paralelo
+        """
         self.similarity_threshold = similarity_threshold if similarity_threshold is not None else FACE_SIMILARITY_THRESHOLD
         self.modelo = modelo if modelo is not None else MODELO_FACE
         self.num_jitters = num_jitters if num_jitters is not None else NUM_JITTERS
+        self.max_workers = max_workers
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     
     def detectar_faces(self, frame):
         """Detecta faces em um frame e retorna as localizações e encodings"""
@@ -37,6 +50,7 @@ class FaceDetector:
                                                         model=self.modelo, 
                                                         number_of_times_to_upsample=1)
         
+        # Logar quando encontrar faces (importante para ambiente de linha de produção)
         if face_locations:
             log_face(f"✅ ENCONTRADAS {len(face_locations)} FACES")
         
@@ -67,6 +81,39 @@ class FaceDetector:
             original_face_locations.append((top, right, bottom, left))
         
         return original_face_locations, face_encodings
+    
+    def _processar_face_individual(self, args):
+        """
+        Processa uma face individual (para execução paralela)
+        
+        Args:
+            args: Tupla contendo (frame, face_location, face_encoding, pessoa_conhecida_encoding, pessoa_info, index)
+        
+        Returns:
+            Tupla com (face_location, match, similarity, face_filename, index)
+        """
+        frame, face_location, face_encoding, pessoa_conhecida_encoding, pessoa_info, index = args
+        
+        # Calcular a distância entre os encodings (menor = mais similar)
+        face_distances = face_recognition.face_distance([pessoa_conhecida_encoding], face_encoding)
+        
+        # Verificar se a face é similar o suficiente
+        match = face_distances[0] <= self.similarity_threshold
+        similarity = 1 - face_distances[0]  # Converter distância para similaridade (0-1)
+        
+        # Salvar a face
+        face_filename = self.salvar_face(
+            frame, face_location, match, similarity, pessoa_info if match else None)
+        
+        # Logar resultado para todas as faces (importante em ambiente de linha de produção)
+        if match:
+            log_face(f"👤 Face {index+1}: {pessoa_info['nome']} RECONHECIDO "
+                  f"(Similaridade: {similarity:.2f})")
+        else:
+            log_face(f"👤 Face {index+1}: PESSOA DESCONHECIDA "
+                  f"(Similaridade: {similarity:.2f})")
+        
+        return (face_location, match, similarity, face_filename, index)
     
     def comparar_faces(self, face_encodings, pessoa_conhecida_encoding):
         """Compara os encodings das faces detectadas com o encoding conhecido"""
@@ -119,7 +166,7 @@ class FaceDetector:
         return filename
     
     def processar_faces_no_frame(self, frame, pessoa_conhecida_encoding, pessoa_info):
-        """Processa faces em um único frame"""
+        """Processa faces em um único frame usando processamento paralelo"""
         # Detectar faces
         face_locations, face_encodings = self.detectar_faces(frame)
         
@@ -127,20 +174,31 @@ class FaceDetector:
         if not face_locations:
             return frame, False
         
-        # Logar quantidade de faces detectadas
+        # Logar quantidade de faces detectadas (importante para ambiente de linha de produção)
         log_face(f"Detectadas {len(face_locations)} faces na imagem")
         
-        # Comparar com encoding conhecido
-        resultados = self.comparar_faces(face_encodings, pessoa_conhecida_encoding)
+        # Preparar argumentos para processamento paralelo
+        args_list = [
+            (frame.copy(), face_location, face_encoding, pessoa_conhecida_encoding, pessoa_info, i)
+            for i, (face_location, face_encoding) in enumerate(zip(face_locations, face_encodings))
+        ]
         
-        # Flag para indicar se alguma face foi encontrada
-        face_encontrada = False
+        # Processar faces em paralelo
+        resultados = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = [executor.submit(self._processar_face_individual, args) for args in args_list]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    resultados.append(future.result())
+                except Exception as e:
+                    log_face(f"Erro ao processar face: {str(e)}")
         
-        # Processar resultados
-        for j, ((top, right, bottom, left), (match, similarity)) in enumerate(
-                zip(face_locations, resultados)):
-            
-            face_encontrada = True
+        # Ordenar resultados pelo índice original
+        resultados.sort(key=lambda x: x[4])
+        
+        # Desenhar resultados no frame
+        for face_location, match, similarity, _, _ in resultados:
+            top, right, bottom, left = face_location
             
             # Desenhar retângulo na face
             color = COR_VERDE if match else COR_VERMELHO
@@ -154,18 +212,10 @@ class FaceDetector:
             
             cv2.putText(frame, texto, (left, top - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-            
-            # Sempre salvar a face quando processada (apenas ocorre após movimento)
-            face_filename = self.salvar_face(
-                frame, (top, right, bottom, left), match, similarity, pessoa_info if match else None)
-            
-            log_captura(f"Face salva: {face_filename} - Motivo: Movimento detectado")
-            
-            if match:
-                log_face(f"👤 Face {j+1}: {pessoa_info['nome']} RECONHECIDO "
-                      f"(Similaridade: {similarity:.2f})")
-            else:
-                log_face(f"👤 Face {j+1}: PESSOA DESCONHECIDA "
-                      f"(Similaridade: {similarity:.2f})")
         
-        return frame, face_encontrada 
+        return frame, len(resultados) > 0
+    
+    def __del__(self):
+        """Destrutor para garantir que o pool de threads seja encerrado corretamente"""
+        if hasattr(self, 'thread_pool'):
+            self.thread_pool.shutdown(wait=False) 
