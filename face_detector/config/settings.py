@@ -5,7 +5,7 @@ Contém todas as constantes e parâmetros utilizados pelo sistema.
 import numpy as np
 
 # URL RTSP fixa que sabemos que funciona
-RTSP_URL = "rtsp://192.168.0.136:554/0/av0"
+RTSP_URL = "rtsp://192.168.0.133:554/0/av0"
 
 # Configurações de detecção de movimento
 MOVIMENTO_THRESHOLD = 15000  # Limiar de detecção de movimento (quanto menor, mais sensível)
