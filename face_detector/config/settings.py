@@ -19,6 +19,7 @@ MONGODB_AUTH_SOURCE = "admin"
 MOVIMENTO_THRESHOLD = 15000  # Limiar de detecção de movimento (quanto menor, mais sensível)
 AREA_MINIMA_CONTORNO = 5000  # Área mínima de contorno para considerar como movimento real
 FRAMES_APOS_MOVIMENTO = 5    # Número de frames para processar após detectar movimento
+INTERVALO_ENTRE_FRAMES = 0.1  # Intervalo entre cada frame após movimento (segundos)
 INTERVALO_MINIMO_MOVIMENTO = 0.5  # Intervalo mínimo entre detecções de movimento (segundos)
 
 # Configurações de reconhecimento facial

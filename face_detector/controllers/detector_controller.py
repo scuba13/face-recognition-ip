@@ -18,7 +18,7 @@ from face_detector.config.settings import (
     MOVIMENTO_THRESHOLD, AREA_MINIMA_CONTORNO, FRAMES_APOS_MOVIMENTO,
     MAX_FRAMES_SEM_DETECCAO, MODO_DEBUG, COR_VERDE, COR_AMARELO,
     INTERVALO_MINIMO_MOVIMENTO, INTERVALO_MINIMO_FACE, TEMPO_EXPIRACAO_FACE,
-    BUFFER_SIZE_CAPTURA, TAXA_FPS_CAPTURA, TAXA_FPS_UI
+    BUFFER_SIZE_CAPTURA, TAXA_FPS_CAPTURA, TAXA_FPS_UI, INTERVALO_ENTRE_FRAMES
 )
 from face_detector.services.face_detector import FaceDetector
 from face_detector.services.motion_detector import MotionDetector
@@ -248,6 +248,9 @@ class DetectorController:
                             self.face_queue.put((pasta_atual, timestamp))
                             log_movimento(f"Captura completa - {FRAMES_APOS_MOVIMENTO} frames salvos em {pasta_atual}")
                             pasta_atual = None
+                    else:
+                        # Aguardar o intervalo configurado entre frames
+                        time.sleep(INTERVALO_ENTRE_FRAMES)
                 
                 # Atualizar frame anterior para próxima detecção de movimento
                 frame_anterior = frame.copy()
