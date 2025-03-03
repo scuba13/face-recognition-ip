@@ -5,24 +5,11 @@ import os
 import pickle
 import numpy as np
 from face_detector.utils.logger import log_info
-from face_detector.config.settings import PESSOA_CONHECIDA_ENCODING, PESSOA_INFO
 
 def criar_estrutura_pastas():
     """Cria a estrutura de pastas para organizar as imagens"""
-    # Pasta principal para capturas
+    # Pasta principal para capturas temporárias
     os.makedirs("capturas", exist_ok=True)
-    
-    # Subpastas para organizar por tipo
-    os.makedirs("capturas/movimento", exist_ok=True)  # Frames com movimento
-    os.makedirs("capturas/faces", exist_ok=True)      # Faces recortadas
-    os.makedirs("capturas/faces/match", exist_ok=True)      # Faces reconhecidas
-    os.makedirs("capturas/faces/desconhecido", exist_ok=True)  # Faces desconhecidas
-    os.makedirs("capturas/frames", exist_ok=True)     # Frames completos com anotações
-    os.makedirs("capturas/manual", exist_ok=True)     # Capturas manuais
-    
-    # Pasta para encodings
-    os.makedirs("encodings", exist_ok=True)
-    
     log_info("Estrutura de pastas criada com sucesso")
 
 def salvar_encoding(encoding, nome_arquivo, diretorio="encodings"):

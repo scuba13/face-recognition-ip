@@ -14,7 +14,7 @@ import signal
 import os
 
 from face_detector.config.settings import (
-    RTSP_URL, PESSOA_CONHECIDA_ENCODING, PESSOA_INFO,
+    RTSP_URL,
     MOVIMENTO_THRESHOLD, AREA_MINIMA_CONTORNO, FRAMES_APOS_MOVIMENTO,
     MAX_FRAMES_SEM_DETECCAO, MODO_DEBUG, COR_VERDE, COR_AMARELO,
     INTERVALO_MINIMO_MOVIMENTO, INTERVALO_MINIMO_FACE, TEMPO_EXPIRACAO_FACE,
@@ -24,7 +24,7 @@ from face_detector.services.face_detector import FaceDetector
 from face_detector.services.motion_detector import MotionDetector
 from face_detector.services.video_capture import VideoCapture
 from face_detector.utils.logger import log_info, log_debug, log_movimento, log_face, log_captura, log_error
-from face_detector.utils.file_utils import criar_estrutura_pastas, carregar_encoding_teste
+from face_detector.utils.file_utils import criar_estrutura_pastas
 from face_detector.utils.image_utils import adicionar_info_tela, salvar_imagem
 
 class DetectorController:
@@ -43,9 +43,6 @@ class DetectorController:
         
         # Criar estrutura de pastas
         criar_estrutura_pastas()
-        
-        # Carregar encoding da pessoa conhecida
-        self.pessoa_conhecida_encoding = carregar_encoding_teste()
         
         # Fonte de vídeo (RTSP ou câmera)
         self.rtsp_url = rtsp_url if rtsp_url else RTSP_URL
@@ -107,7 +104,6 @@ class DetectorController:
             return False
         
         # Informações iniciais
-        log_info(f"Pessoa de referência: {PESSOA_INFO['nome']} (ID: {PESSOA_INFO['id']})")
         log_info("Controles: ESC = Sair")
         log_info(f"Detecção baseada em movimento: {FRAMES_APOS_MOVIMENTO} frames após movimento")
         log_info(f"Processando e salvando faces APENAS após detecção de movimento")
@@ -197,8 +193,9 @@ class DetectorController:
         log_info("Thread de detecção de movimento iniciada")
         
         frame_anterior = None
-        movimento_count = 0
         ultimo_movimento = 0  # Timestamp do último movimento detectado
+        frames_restantes = 0
+        pasta_atual = None
         
         while self.running:
             try:
@@ -221,53 +218,43 @@ class DetectorController:
                 movimento_detectado, movimento_area, frame_com_movimento = self.motion_detector.detectar(
                     frame.copy(), frame_anterior.copy())
                 
-                # Atualizar frame anterior para próxima detecção de movimento
-                frame_anterior = frame.copy()
-                
                 # Se detectou movimento e passou tempo suficiente desde a última detecção
-                if movimento_detectado and (tempo_desde_ultimo_movimento >= INTERVALO_MINIMO_MOVIMENTO or self.frames_restantes_apos_movimento == 0):
+                if movimento_detectado and (tempo_desde_ultimo_movimento >= INTERVALO_MINIMO_MOVIMENTO):
                     self.frames_sem_deteccao = 0  # Resetar contador de frames sem detecção
                     self.stats['movimento_detectado'] += 1
                     ultimo_movimento = timestamp  # Atualizar timestamp do último movimento
                     
-                    # Limitar logs de movimento para reduzir poluição no terminal
-                    movimento_count += 1
-                    if movimento_count % 5 == 0:  # Logar apenas a cada 5 detecções
-                        log_movimento(f"Movimento detectado (área: {movimento_area:.0f}) - Limiar: {MOVIMENTO_THRESHOLD}")
-                    
-                    # Salvar frame com movimento
+                    # Criar nova pasta para o movimento
                     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    movimento_filename = f"capturas/movimento/movimento_{movimento_area:.0f}_{timestamp_str}.jpg"
-                    salvar_imagem(frame_com_movimento, movimento_filename)
+                    pasta_atual = f"capturas/movimento/movimento_{timestamp_str}"
+                    os.makedirs(pasta_atual, exist_ok=True)
+                    log_movimento(f"Movimento detectado - Iniciando captura de {FRAMES_APOS_MOVIMENTO} frames")
                     
-                    # Configurar para processar 5 frames após movimento (para ambiente de linha de produção)
-                    self.frames_restantes_apos_movimento = FRAMES_APOS_MOVIMENTO  # Voltando para 5 frames
+                    # Iniciar contagem de frames restantes
+                    frames_restantes = FRAMES_APOS_MOVIMENTO
+                
+                # Se ainda tiver frames para capturar após movimento
+                if frames_restantes > 0:
+                    # Salvar frame atual
+                    frame_filename = f"{pasta_atual}/frame_{FRAMES_APOS_MOVIMENTO - frames_restantes + 1:03d}.jpg"
+                    salvar_imagem(frame_com_movimento if movimento_detectado else frame, frame_filename)
+                    log_movimento(f"Frame {FRAMES_APOS_MOVIMENTO - frames_restantes + 1}/{FRAMES_APOS_MOVIMENTO} salvo")
                     
-                    # Enviar para processamento facial
-                    if not self.face_queue.full():
-                        self.face_queue.put((frame.copy(), timestamp, movimento_area))
-                elif self.frames_restantes_apos_movimento > 0:
-                    # Processar frames restantes após movimento
-                    self.frames_restantes_apos_movimento -= 1
+                    frames_restantes -= 1
                     
-                    # Enviar para processamento facial
-                    if not self.face_queue.full():
-                        self.face_queue.put((frame.copy(), timestamp, movimento_area if movimento_detectado else 0))
-                else:
-                    self.frames_sem_deteccao += 1
-                    
-                    # Enviar para exibição direta (sem processamento facial)
-                    frame_processado = frame.copy()
-                    adicionar_info_tela(frame_processado)
-                    
-                    # Adicionar FPS
-                    fps = self.video_capture.get_fps()
-                    cv2.putText(frame_processado, f"FPS: {fps:.1f}", (10, 60), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, COR_VERDE, 2)
-                    
-                    # Enviar para exibição
-                    if not self.result_queue.full():
-                        self.result_queue.put((frame_processado, timestamp))
+                    # Se completou os frames, enviar pasta para processamento
+                    if frames_restantes == 0:
+                        if not self.face_queue.full():
+                            self.face_queue.put((pasta_atual, timestamp))
+                            log_movimento(f"Captura completa - {FRAMES_APOS_MOVIMENTO} frames salvos em {pasta_atual}")
+                            pasta_atual = None
+                
+                # Atualizar frame anterior para próxima detecção de movimento
+                frame_anterior = frame.copy()
+                
+                # Enviar frame para exibição
+                if not self.result_queue.full():
+                    self.result_queue.put(frame_com_movimento if movimento_detectado else frame)
             
             except Exception as e:
                 log_error(f"Erro na thread de detecção de movimento: {str(e)}")
@@ -277,54 +264,72 @@ class DetectorController:
         """Thread dedicada para processamento facial"""
         log_info("Thread de processamento facial iniciada")
         
-        ultima_face_timestamp = 0
-        faces_processadas = {}  # Dicionário para rastrear faces já processadas recentemente
-        
         while self.running:
             try:
-                # Obter próximo frame para processamento facial
+                # Obter próximo lote para processamento facial
                 if self.face_queue.empty():
                     time.sleep(0.01)  # Pequena pausa para não consumir CPU
                     continue
                 
-                frame, timestamp, movimento_area = self.face_queue.get()
+                pasta_lote, timestamp = self.face_queue.get()
+                log_face(f"Processando lote: {pasta_lote}")
                 
-                # Verificar se já passou tempo suficiente desde o último processamento facial
-                tempo_desde_ultima_face = timestamp - ultima_face_timestamp
+                # Verificar se a pasta existe
+                if not os.path.exists(pasta_lote):
+                    log_face(f"Pasta do lote não encontrada: {pasta_lote}")
+                    continue
                 
-                # Processar faces no frame
-                frame_processado, face_encontrada = self.face_detector.processar_faces_no_frame(
-                    frame, self.pessoa_conhecida_encoding, PESSOA_INFO)
+                # Listar todos os frames do lote
+                frames_lote = sorted([f for f in os.listdir(pasta_lote) if f.endswith('.jpg')])
+                log_face(f"Encontrados {len(frames_lote)} frames para processar no lote")
                 
-                # Se encontrou face, atualizar timestamp
-                if face_encontrada:
-                    # Só atualizar o timestamp se passou tempo suficiente ou se é uma nova detecção
-                    if tempo_desde_ultima_face >= INTERVALO_MINIMO_FACE:
-                        ultima_face_timestamp = timestamp
+                faces_encontradas_lote = False
+                
+                # Processar cada frame do lote
+                for frame_filename in frames_lote:
+                    frame_path = os.path.join(pasta_lote, frame_filename)
                     
-                    self.stats['faces_detectadas'] += 1
+                    try:
+                        # Ler o frame
+                        frame = cv2.imread(frame_path)
+                        
+                        if frame is None:
+                            log_face(f"Erro ao ler frame: {frame_path}")
+                            continue
+                        
+                        # Processar faces no frame
+                        frame_processado, faces_encontradas = self.face_detector.processar_faces_no_frame(frame)
+                        
+                        # Atualizar estatísticas
+                        if faces_encontradas:
+                            faces_encontradas_lote = True
+                            self.stats['faces_detectadas'] += 1
+                            log_face(f"✅ Faces detectadas em {frame_filename}")
+                        
+                        # Obter FPS atual
+                        fps = self.video_capture.get_fps()
+                        
+                        # Adicionar informações na tela
+                        frame_processado = adicionar_info_tela(frame_processado, fps=fps)
+                        
+                        # Enviar para exibição
+                        if not self.result_queue.full():
+                            self.result_queue.put(frame_processado)
+                        
+                        # Incrementar contador de frames processados
+                        self.stats['frames_processados'] += 1
+                        
+                    except Exception as e:
+                        log_error(f"Erro ao processar frame {frame_path}: {str(e)}")
                 
-                # Adicionar informações na tela
-                adicionar_info_tela(frame_processado)
+                # Registrar resultado do processamento do lote
+                if faces_encontradas_lote:
+                    log_face(f"✅ Faces encontradas no lote {pasta_lote}")
+                else:
+                    log_face(f"❌ Nenhuma face encontrada no lote {pasta_lote}")
                 
-                # Adicionar FPS e informações de movimento
-                fps = self.video_capture.get_fps()
-                cv2.putText(frame_processado, f"FPS: {fps:.1f}", (10, 60), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, COR_VERDE, 2)
-                
-                cv2.putText(frame_processado, f"Movimento: {movimento_area}", (10, 90), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, COR_AMARELO, 2)
-                
-                # Enviar frame processado para exibição
-                if not self.result_queue.full():
-                    self.result_queue.put((frame_processado, timestamp))
-                
-                # Decrementar contador de frames após movimento
-                if self.frames_restantes_apos_movimento > 0:
-                    self.frames_restantes_apos_movimento -= 1
-                
-                # Incrementar contador de frames processados
-                self.stats['frames_processados'] += 1
+                # Não apagar mais a pasta do lote após processamento
+                log_face(f"✅ Lote processado e mantido para verificação: {pasta_lote}")
                 
             except Exception as e:
                 log_error(f"Erro na thread de processamento facial: {str(e)}")
@@ -358,17 +363,14 @@ class DetectorController:
                 # Verificar se há resultados processados para exibir
                 frame_processado = None
                 while not self.result_queue.empty():
-                    frame_processado, _ = self.result_queue.get()
+                    frame_processado = self.result_queue.get()
                 
                 # Se não houver frame processado, usar o último frame com informações básicas
                 if frame_processado is None and self.ultimo_frame is not None:
                     frame_processado = self.ultimo_frame.copy()
                     # Adicionar informações básicas
-                    adicionar_info_tela(frame_processado)
-                    # Adicionar FPS
                     fps = self.video_capture.get_fps()
-                    cv2.putText(frame_processado, f"FPS: {fps:.1f}", (10, 60), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, COR_VERDE, 2)
+                    frame_processado = adicionar_info_tela(frame_processado, fps=fps)
                 
                 # Mostrar frame processado se disponível
                 if frame_processado is not None:

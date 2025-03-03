@@ -70,4 +70,4 @@ class MotionDetector:
         log_movimento(f"Movimento detectado (área: {movimento_area:.0f}) - Limiar: {self.threshold}")
         log_captura(f"Frame de movimento salvo: {movimento_filename}")
         
-        return movimento_filename 
+        return movimento_filename
